@@ -18,7 +18,7 @@
 #define LEDM        RA4
 #define LEDR        RA5
 
-//filter inputs
+//filtered inputs
 union
 {
     uint8_t B;
@@ -54,7 +54,7 @@ int main(int argc, char** argv)
    step=0;
    while(1)
    {    
-     if(TMR2IF)
+     if(TMR2IF)//1ms
      {
        TMR2IF=0;  
        switch (step)
