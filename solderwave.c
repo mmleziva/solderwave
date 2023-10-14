@@ -60,7 +60,7 @@ union
 
 uint8_t in[8], set, res, film ,aux;
 
-uint8_t step, k, j ;
+uint8_t step, k, j ,lt;
 
 uint16_t TpreAD,TchlAD;
 
@@ -78,6 +78,8 @@ uint16_t adc_read(unsigned char channel)
 
 int main(int argc, char** argv)
 {
+        //config
+   PORTC=0; 
    TRISC=0x80;     //outs enable
    OPTION_REGbits.nRBPU=0;// pull up
    TRISAbits.TRISA3=0;     //LED out enable
@@ -90,24 +92,21 @@ int main(int argc, char** argv)
    CCP1CONbits.CCP1M= 0xf;//PWM RC2
    T2CONbits.T2CKPS= 1;//prescaller=4
    PR2=250;   //250*4=1000us
-   T2CONbits.TOUTPS=1;//postscalller=2, T2IF 2ms
-   T2CONbits.TMR2ON= 1;//start T2
-   
-  step=0;
-   step=52;//t
-   
-   //ini filters
+   T2CONbits.TOUTPS=4;//postscalller=5, T2IF 5ms
+   T2CONbits.TMR2ON= 1;//start T2   
+   step=0;
+    //ini filters
    ai.B= ~PORTB;
    ai.RESTART= !RC7;
    film= ai.B; //inverted inputs
    for (j=0; j<8; j++)
-       {
+   {
            in[j]= film;
-        }
-        fil.B= film;
+   }
+   fil.B= film;
    fd.B=0;
    fh.B=0;
-   
+        //infinited cycle
    while(1)
    {    
      CLRWDT();
@@ -134,60 +133,70 @@ int main(int argc, char** argv)
        
        switch (step)
        {
-        case 10://ini
-            if(fh.VREADY)//vozik najety
+        case 0://ini
             {
-             fh.VREADY=0;
+             LEDR=1;   
+             step=10;
+            }
+            break;
+        case 10://ini
+            if(fil.VREADY)//vozik najety
+            {
              step=20;
             }
             break;
         case 20: //ready
-            if(fil.VREADY & fh.START)
+            LEDR=1;  
+            if(fil.VREADY & !fil.CHLAZIN  & fh.START)
             {
                 fh.START=0;
-                fd.VREADY=0;
                 POJEZD= 1;
                 step=30;
-                eeprom_write(0,step);
+             //   eeprom_write(0,step);
             }
             break;
         case 30: //arrive
-            if(fd.VREADY )
+            LEDZ=1;
+            POJEZD=1;
+            if(!fil.VREADY )
             {
-                fd.VREADY=0;
                 step=40;
                 FLUX= 1;
             }
             break;
         case 40: //flux
-            if(fh.EFLUXIN )
+            POJEZD=1;
+            FLUX=1;
+            if(fil.EFLUXIN )
             {
-                fh.EFLUXIN=0;
                 FLUX=0;
                 step=50;
             }
             break;
         case 50: //go to preheating
-            if(fh.PREHIN )
+            if(fil.PREHIN )
             {
-                fh.PREHIN=0;
                 POJEZD=0;
                 Tmils=0;
                 step=52;
             }
             break;
         case 52: //preheating
+            LEDM= !(lt& 0x40);//per 0,7s
+            lt++;
             TpreAD= adc_read(TPREC);
             Tpre= MULT* (uint32_t)TpreAD;
             if(Tmils >= Tpre)
             {
                 POJEZD=1;
+                LEDM=0;
                 step=60;
             }
             else
-                Tmils+=2;
+                Tmils+=5;
             break;
         case 60: //go to wave
+            POJEZD=1;
             if(!fil.PREHIN)
             {
                 CERPADLO=1;
@@ -195,6 +204,7 @@ int main(int argc, char** argv)
             }
             break;
         case 70: //wave pump
+            CERPADLO=1;
             if(fil.CHLAZIN)
             {
                 CERPADLO=0;
@@ -205,23 +215,37 @@ int main(int argc, char** argv)
             }
             break;
         case 80: //cooling
+            CHLAZENI=1;
+            LEDM= !(lt& 0x40);//per 0,7s
+            lt++;
             TchlAD= adc_read(TCHLC);
             Tchl= MULT* (uint32_t)TchlAD;
             if(Tmils >= Tchl)
             {
                 CHLAZENI=0;
+                LEDM=0;
                 step=90;
             }
             else
-                Tmils+=2;
+                Tmils+=5;
             break;
         case 90://finish
-            if(!fil.CHLAZIN)//vozik odjety
+            if(!fil.CHLAZIN)//vozik odjety z koncaku chlazeni
             {
-             step=10;
+             LEDZ= 0;   
+             step=100;
+            }
+            break;
+         case 100://ini
+            LEDR= !(lt& 0x40);//per 0,7s
+            lt++;
+            if(fil.VREADY)//vozik najety
+            {
+             step=20;
             }
             break;
         default:
+            LEDR= 1; 
             break;
        }     
      }
