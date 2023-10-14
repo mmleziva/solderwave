@@ -79,6 +79,7 @@ uint16_t adc_read(unsigned char channel)
 int main(int argc, char** argv)
 {
    TRISC=0x80;     //outs enable
+   OPTION_REGbits.nRBPU=0;// pull up
    TRISAbits.TRISA3=0;     //LED out enable
    TRISAbits.TRISA4=0;     //LED out enable
    TRISAbits.TRISA5=0;     //LED out enable
@@ -88,11 +89,13 @@ int main(int argc, char** argv)
    CCPR1=125;
    CCP1CONbits.CCP1M= 0xf;//PWM RC2
    T2CONbits.T2CKPS= 1;//prescaller=4
-   PR2=250;
+   PR2=250;   //250*4=1000us
+   T2CONbits.TOUTPS=1;//postscalller=2, T2IF 2ms
    T2CONbits.TMR2ON= 1;//start T2
    
-   //step=0;
+  step=0;
    step=52;//t
+   
    //ini filters
    ai.B= ~PORTB;
    ai.RESTART= !RC7;
@@ -104,10 +107,11 @@ int main(int argc, char** argv)
         fil.B= film;
    fd.B=0;
    fh.B=0;
+   
    while(1)
    {    
      CLRWDT();
-     if(TMR2IF)//1ms
+     if(TMR2IF)//2ms
      {
        TMR2IF=0;  
        k++;
@@ -121,9 +125,9 @@ int main(int argc, char** argv)
        for (j=0; j<8; j++)
        {
            set &= in[j];
-           res |= in[j];
+           res |= (in[j]);
        }
-       fil.B= ((~film) & set) | (film & (~res));
+       fil.B= ((~film) & set) | (film & (res));
        fd.B= fd.B |(film & (~fil.B) );//fall edge        
        fh.B= fh.B |((~film) & fil.B ); //rise edge 
        film= fil.B;// memory
@@ -144,6 +148,7 @@ int main(int argc, char** argv)
                 fd.VREADY=0;
                 POJEZD= 1;
                 step=30;
+                eeprom_write(0,step);
             }
             break;
         case 30: //arrive
@@ -180,7 +185,7 @@ int main(int argc, char** argv)
                 step=60;
             }
             else
-                Tmils++;
+                Tmils+=2;
             break;
         case 60: //go to wave
             if(!fil.PREHIN)
@@ -208,7 +213,7 @@ int main(int argc, char** argv)
                 step=90;
             }
             else
-                Tmils++;
+                Tmils+=2;
             break;
         case 90://finish
             if(!fil.CHLAZIN)//vozik odjety
