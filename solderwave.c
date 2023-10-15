@@ -40,7 +40,7 @@ void tim1(void)
 #define TCHLC        1
 #define TRYCHC       2
 
-#define MULT       (6*(60/4)*(1000/8)/(0x400/(4*8)))
+#define MULT       (6*(60/4)*(1000/8)/(0x400/(4*8)))//MULT=doba(6*60*1000ms)/rozsahAD(0x400bit)
 //filtered inputs
 union
 {
@@ -57,6 +57,8 @@ union
       uint8_t RESTART: 1; 
     };
 } ai,  fil, fh,fd;
+
+_Bool PAUSE;
 
 uint8_t in[8], set, res, film ,aux;
 
@@ -79,7 +81,7 @@ uint16_t adc_read(unsigned char channel)
 int main(int argc, char** argv)
 {
         //config
-   PORTC=0; 
+   PORTC=0x80; 
    TRISC=0x80;     //outs enable
    OPTION_REGbits.nRBPU=0;// pull up
    TRISAbits.TRISA3=0;     //LED out enable
@@ -109,13 +111,13 @@ int main(int argc, char** argv)
         //infinited cycle
    while(1)
    {    
-     CLRWDT();
+     CLRWDT();  //clear watchdog timer
      if(TMR2IF)//2ms
      {
-       TMR2IF=0;  
+       TMR2IF=0;
+                   //filters Td=8*5=40ms
        k++;
        k %=8;
-                //filters
        ai.B= ~PORTB;    //inverted inputs
        ai.RESTART= !RC7;
        in[k]= ai.B;
@@ -123,23 +125,52 @@ int main(int argc, char** argv)
        res=0;
        for (j=0; j<8; j++)
        {
-           set &= in[j];
-           res |= (in[j]);
+           set &= in[j];   //all 8 last 5ms samples must be 1 for set to 1  
+           res |= (in[j]); //all 8 last 5ms samples must be 0 for reset to 0  
        }
        fil.B= ((~film) & set) | (film & (res));
        fd.B= fd.B |(film & (~fil.B) );//fall edge        
        fh.B= fh.B |((~film) & fil.B ); //rise edge 
        film= fil.B;// memory
-       
+             //cycles 
+       if(fh.RESTART)
+       {
+           fh.RESTART=0;
+           POJEZD=0;
+           FLUX=0;
+           CERPADLO=0;
+           CHLAZENI=0;
+           LEDZ=0;
+           LEDM=0;
+           LEDR=1;
+           step=10;
+       }   
+       else if (fh.STOP)
+       {
+           fh.STOP=0;
+           PAUSE= !PAUSE;
+       }
+       else if(PAUSE)
+       {
+           LEDZ= !(lt& 0x40);//per 0,7s
+           lt++;
+           POJEZD=0;
+           FLUX=0;
+           CERPADLO=0;
+           CHLAZENI=0; 
+       }
+       else
        switch (step)
        {
         case 0://ini
-            {
-             LEDR=1;   
+            {             
              step=10;
             }
             break;
-        case 10://ini
+        case 10://default state
+            LEDR=1; 
+            LEDZ=0;
+            LEDM=0;
             if(fil.VREADY)//vozik najety
             {
              step=20;
@@ -147,15 +178,16 @@ int main(int argc, char** argv)
             break;
         case 20: //ready
             LEDR=1;  
+            LEDZ=0;
             if(fil.VREADY & !fil.CHLAZIN  & fh.START)
             {
                 fh.START=0;
                 POJEZD= 1;
                 step=30;
-             //   eeprom_write(0,step);
             }
             break;
         case 30: //arrive
+            LEDR=0;
             LEDZ=1;
             POJEZD=1;
             if(!fil.VREADY )
@@ -165,6 +197,7 @@ int main(int argc, char** argv)
             }
             break;
         case 40: //flux
+            LEDZ=1;
             POJEZD=1;
             FLUX=1;
             if(fil.EFLUXIN )
@@ -174,18 +207,21 @@ int main(int argc, char** argv)
             }
             break;
         case 50: //go to preheating
+            LEDZ=1;
             if(fil.PREHIN )
             {
                 POJEZD=0;
                 Tmils=0;
+                lt=0;
                 step=52;
             }
             break;
         case 52: //preheating
+            LEDZ=1;
             LEDM= !(lt& 0x40);//per 0,7s
             lt++;
             TpreAD= adc_read(TPREC);
-            Tpre= MULT* (uint32_t)TpreAD;
+            Tpre= MULT* (uint32_t)TpreAD;//nastavena doba predehrevu v ms
             if(Tmils >= Tpre)
             {
                 POJEZD=1;
@@ -193,9 +229,12 @@ int main(int argc, char** argv)
                 step=60;
             }
             else
+            {
                 Tmils+=5;
+            }
             break;
         case 60: //go to wave
+            LEDZ=1;
             POJEZD=1;
             if(!fil.PREHIN)
             {
@@ -204,6 +243,7 @@ int main(int argc, char** argv)
             }
             break;
         case 70: //wave pump
+            LEDZ=1;
             CERPADLO=1;
             if(fil.CHLAZIN)
             {
@@ -211,10 +251,12 @@ int main(int argc, char** argv)
                 POJEZD=0;
                 CHLAZENI=1;
                 Tmils=0;
+                lt=0;
                 step=80;
             }
             break;
         case 80: //cooling
+            LEDZ=1;
             CHLAZENI=1;
             LEDM= !(lt& 0x40);//per 0,7s
             lt++;
@@ -229,14 +271,15 @@ int main(int argc, char** argv)
             else
                 Tmils+=5;
             break;
-        case 90://finish
+        case 90://cooling finished
+            LEDZ=1;
             if(!fil.CHLAZIN)//vozik odjety z koncaku chlazeni
-            {
-             LEDZ= 0;   
+            {  
              step=100;
             }
             break;
-         case 100://ini
+         case 100://all cycle finihed
+            LEDZ= 0; 
             LEDR= !(lt& 0x40);//per 0,7s
             lt++;
             if(fil.VREADY)//vozik najety
@@ -245,7 +288,7 @@ int main(int argc, char** argv)
             }
             break;
         default:
-            LEDR= 1; 
+            LEDR= 1; //alarm
             break;
        }     
      }
