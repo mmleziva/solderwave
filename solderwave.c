@@ -9,10 +9,12 @@
 #include <stdlib.h>
 #include <xc.h>
 #pragma config FOSC = XT
-#pragma config LVP = ON
-#pragma config PWRTE = OFF
+#pragma config LVP = OFF
+#pragma config PWRTE = ON
 #pragma config BOREN = ON
 #pragma config WDTE = ON
+#pragma config CPD = OFF
+#pragma config WRT = OFF
 
 #define DelayIni T1CON=0b000000000;
 #define delay(x) {TMR1= ~(x); tim1();}
@@ -56,21 +58,21 @@ union
       uint8_t       : 1; 
       uint8_t RESTART: 1; 
     };
-} ai,  fil, fh,fd;
+} ai,  fil, fh,fd;  //vzorek, filtr, hrany vstupu
 
-_Bool PAUSE;
+_Bool PAUSE;// priznak pauza
 
-uint8_t in[8], set, res, film ,aux;
+uint8_t in[8], set, res, film ;//prom. fitru
 
-uint8_t step, k, j ,lt;
+uint8_t step, k, j ,lt;//krok programu, mereni cyklu, odmer. blik.LED
 
-uint16_t TpreAD,TchlAD;
+uint16_t TpreAD,TchlAD;//potaky
 
-uint32_t Tmils,Tpre,Tchl;
+uint32_t Tmils,Tpre,Tchl;//odmereny a nastavene casy potaku v ms
 
 uint16_t adc_read(unsigned char channel)
 {  
- ADCON0 = (channel << 3) | 0xC1;		// !T enable ADC, RC osc.
+ ADCON0 = (channel << 3) + 0xC1;		// !T enable ADC, RC osc.
  DelayUs(8); 
  GO_DONE = 1;
  while(GO_DONE)
@@ -88,12 +90,12 @@ int main(int argc, char** argv)
    TRISAbits.TRISA4=0;     //LED out enable
    TRISAbits.TRISA5=0;     //LED out enable
    ADCON1bits.ADFM= 1;//right just. ADC
-   CCPR2=125;
+   CCPR2=125;   //125*4=500us duty cycle TMR2
    CCP2CONbits.CCP2M= 0xf;//PWM RC1
    CCPR1=125;
    CCP1CONbits.CCP1M= 0xf;//PWM RC2
    T2CONbits.T2CKPS= 1;//prescaller=4
-   PR2=250;   //250*4=1000us
+   PR2=250;   //250*4=1000us TMR2 period
    T2CONbits.TOUTPS=4;//postscalller=5, T2IF 5ms
    T2CONbits.TMR2ON= 1;//start T2   
    step=0;
@@ -106,13 +108,13 @@ int main(int argc, char** argv)
            in[j]= film;
    }
    fil.B= film;
-   fd.B=0;
+   fd.B=0;  //edges
    fh.B=0;
         //infinited cycle
    while(1)
    {    
      CLRWDT();  //clear watchdog timer
-     if(TMR2IF)//2ms
+     if(TMR2IF)//5ms
      {
        TMR2IF=0;
                    //filters Td=8*5=40ms
@@ -261,7 +263,7 @@ int main(int argc, char** argv)
             LEDM= !(lt& 0x40);//per 0,7s
             lt++;
             TchlAD= adc_read(TCHLC);
-            Tchl= MULT* (uint32_t)TchlAD;
+            Tchl= MULT* (uint32_t)TchlAD;//nastavena doba chlazeni v ms
             if(Tmils >= Tchl)
             {
                 CHLAZENI=0;
@@ -293,6 +295,6 @@ int main(int argc, char** argv)
        }     
      }
    }
-    return (EXIT_SUCCESS);
+   return (EXIT_SUCCESS);
 }
 
